@@ -142,6 +142,10 @@ export default function DataGridApp() {
           return;
         }
 
+        // Log the WebSocket URL being used
+        console.log("WebSocket URL from env:", process.env.NEXT_PUBLIC_WS_URL);
+        console.log("Using WebSocket URL:", wsServerUrl);
+
         if (!wsServerUrl) {
           console.warn("WebSocket server URL not configured");
           return;
@@ -178,8 +182,12 @@ export default function DataGridApp() {
         };
 
         ws.onerror = () => {
-          console.warn("WebSocket connection failed");
-          console.log("To enable real-time updates, run: npm run ws-server");
+          console.warn("WebSocket connection failed. This is expected if the WebSocket server is not running.");
+          if (wsServerUrl.includes("localhost")) {
+            console.log("To enable real-time updates, run: npm run ws-server");
+          } else {
+            console.log("Check if the WebSocket server is running at:", wsServerUrl);
+          }
           setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
         };
       } catch (error) {
