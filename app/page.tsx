@@ -6,9 +6,8 @@ import { ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import type { ColDef, GridReadyEvent } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,14 +20,12 @@ import {
 import {
   Loader2,
   Wifi,
-  Download,
   RefreshCw,
   Zap,
   Activity,
   FileText,
   FileSpreadsheet,
 } from "lucide-react";
-import { ConnectionStatus } from "@/components/connection-status";
 import {
   generateLargeDataset,
   generateColumnDefinitions,
@@ -60,7 +57,6 @@ interface WSMessage {
 const TOTAL_ROWS = 100000;
 const TOTAL_COLUMNS = 120;
 const PAGE_SIZE = 100;
-const FILTER_PAGE_SIZE = 1000; // Larger page size when filtering
 
 export default function DataGridApp() {
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats>({
@@ -93,92 +89,7 @@ export default function DataGridApp() {
 
   const gridRef = useRef<AgGridReact>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const queryClient = useQueryClient();
-
-  // Update current time
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Initialize WebSocket connection
-  useEffect(() => {
-    let reconnectTimeout: NodeJS.Timeout;
-
-    const connectWebSocket = () => {
-      // Only attempt WebSocket connection if we're in the browser
-      if (typeof window === "undefined") return;
-
-      try {
-        // Check if WebSocket is supported
-        if (!window.WebSocket) {
-          console.warn("WebSocket is not supported in this browser");
-          return;
-        }
-
-        wsRef.current = new WebSocket("ws://localhost:3001");
-
-        wsRef.current.onopen = () => {
-          setPerformanceStats((prev) => ({ ...prev, wsConnected: true }));
-          console.log("WebSocket connected successfully");
-          // Clear any existing reconnect timeout
-          if (reconnectTimeout) {
-            clearTimeout(reconnectTimeout);
-          }
-        };
-
-        wsRef.current.onmessage = (event) => {
-          try {
-            const message: WSMessage = JSON.parse(event.data);
-            if (message.type === "update") {
-              handleRealTimeUpdate(message);
-            }
-          } catch (error) {
-            console.error("Error parsing WebSocket message:", error);
-          }
-        };
-
-        wsRef.current.onclose = (event) => {
-          setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
-          console.log("WebSocket disconnected:", event.code, event.reason);
-
-          // Only attempt to reconnect if it wasn't a manual close
-          if (event.code !== 1000) {
-            console.log("Attempting to reconnect in 5 seconds...");
-            reconnectTimeout = setTimeout(connectWebSocket, 5000);
-          }
-        };
-
-        wsRef.current.onerror = (error) => {
-          console.warn(
-            "WebSocket connection failed. This is expected if the WebSocket server is not running."
-          );
-          console.log("To enable real-time updates, run: npm run ws-server");
-          setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
-        };
-      } catch (error) {
-        console.warn("Failed to initialize WebSocket connection:", error);
-        console.log(
-          "Real-time updates will be disabled. To enable them, run: npm run ws-server"
-        );
-        setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
-      }
-    };
-
-    // Attempt initial connection
-    connectWebSocket();
-
-    return () => {
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout);
-      }
-      if (wsRef.current) {
-        wsRef.current.close(1000, "Component unmounting");
-      }
-    };
-  }, []);
+  const wsServerUrl = process.env.NEXT_PUBLIC_WEBSOCKET_SERVER_URL;
 
   const handleRealTimeUpdate = useCallback(
     (message: WSMessage) => {
@@ -207,6 +118,86 @@ export default function DataGridApp() {
     },
     [allData.length]
   );
+
+  // Update current time
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const connectWebSocket = () => {
+      // Only attempt WebSocket connection if we're in the browser
+      if (typeof window === "undefined") return;
+
+      try {
+        // Check if WebSocket is supported
+        if (!window.WebSocket) {
+          console.warn("WebSocket is not supported in this browser");
+          return;
+        }
+
+        if (!wsServerUrl) {
+          console.warn("WebSocket server URL not configured");
+          return;
+        }
+
+        const ws = new WebSocket(wsServerUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setPerformanceStats((prev) => ({ ...prev, wsConnected: true }));
+          console.log("WebSocket connected successfully");
+          clearTimeout(reconnectTimeout);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message: WSMessage = JSON.parse(event.data);
+            if (message.type === "update") {
+              handleRealTimeUpdate(message);
+            }
+          } catch (error) {
+            console.error("Error parsing WebSocket message:", error);
+          }
+        };
+
+        ws.onclose = (event) => {
+          setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
+          console.log("WebSocket disconnected:", event.code, event.reason);
+
+          if (event.code !== 1000) {
+            console.log("Attempting to reconnect in 5 seconds...");
+            reconnectTimeout = setTimeout(connectWebSocket, 5000);
+          }
+        };
+
+        ws.onerror = () => {
+          console.warn("WebSocket connection failed");
+          console.log("To enable real-time updates, run: npm run ws-server");
+          setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
+        };
+      } catch (error) {
+        console.warn("Failed to initialize WebSocket connection:", error);
+        console.log(
+          "Real-time updates will be disabled. To enable them, run: npm run ws-server"
+        );
+        setPerformanceStats((prev) => ({ ...prev, wsConnected: false }));
+      }
+    };
+
+    connectWebSocket();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+      wsRef.current?.close(1000, "Component unmounting");
+    };
+  }, [wsServerUrl, handleRealTimeUpdate]);
 
   // Load data for filtering (limited dataset for demo)
   const loadDataForFiltering = useCallback(async () => {
