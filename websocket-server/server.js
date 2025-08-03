@@ -1,9 +1,24 @@
 const WebSocket = require("ws")
+const http = require("http")
 
 const PORT = process.env.PORT || 3001
-const wss = new WebSocket.Server({ port: PORT })
 
-console.log(`WebSocket server started on port ${PORT}`)
+// Create HTTP server
+const server = http.createServer((req, res) => {
+  // Health check endpoint for Render
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' })
+    res.end('WebSocket server is running')
+  } else {
+    res.writeHead(404)
+    res.end('Not found')
+  }
+})
+
+// Create WebSocket server using the HTTP server
+const wss = new WebSocket.Server({ server })
+
+console.log(`Server starting on port ${PORT}`)
 
 // Store connected clients
 const clients = new Set()
@@ -11,6 +26,9 @@ const clients = new Set()
 wss.on("connection", (ws) => {
   console.log("Client connected")
   clients.add(ws)
+
+  // Send initial connection confirmation
+  ws.send(JSON.stringify({ type: 'connected', message: 'Connected to WebSocket server' }))
 
   ws.on("close", () => {
     console.log("Client disconnected")
@@ -20,6 +38,10 @@ wss.on("connection", (ws) => {
   ws.on("error", (error) => {
     console.error("WebSocket error:", error)
     clients.delete(ws)
+  })
+
+  ws.on("message", (data) => {
+    console.log("Received message:", data.toString())
   })
 })
 
@@ -97,11 +119,27 @@ setInterval(() => {
   }
 }, 2000) // Send update every 2 seconds
 
+// Start the HTTP server
+server.listen(PORT, () => {
+  console.log(`HTTP/WebSocket server listening on port ${PORT}`)
+  console.log(`Health check available at http://localhost:${PORT}/health`)
+  console.log(`WebSocket endpoint: ws://localhost:${PORT}`)
+})
+
 // Handle graceful shutdown
 process.on("SIGINT", () => {
-  console.log("Shutting down WebSocket server...")
+  console.log("Shutting down server...")
+  
+  // Close all WebSocket connections
+  clients.forEach(client => {
+    client.close(1000, 'Server shutting down')
+  })
+  
   wss.close(() => {
     console.log("WebSocket server closed")
-    process.exit(0)
+    server.close(() => {
+      console.log("HTTP server closed")
+      process.exit(0)
+    })
   })
 })
