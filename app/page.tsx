@@ -89,7 +89,7 @@ export default function DataGridApp() {
 
   const gridRef = useRef<AgGridReact>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const wsServerUrl = process.env.NEXT_PUBLIC_WEBSOCKET_SERVER_URL;
+  const wsServerUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001";
 
   const handleRealTimeUpdate = useCallback(
     (message: WSMessage) => {
