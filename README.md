@@ -1,13 +1,15 @@
 # PesoHQ - High Performance Data Grid
 
-A high-performance data grid application built with React, Next.js, and AG Grid that efficiently handles large datasets (100+ columns, 100K+ records) with real-time updates.
+A high-performance data grid application built with React, Next.js, and AG Grid that efficiently handles large datasets (100+ columns, 100K+ records) with real-time updates and MongoDB persistence.
 
 ## Features
 
 - **Large Dataset Support**: Handles 100+ columns and 100K+ records efficiently
-- **Virtualization**: Only renders visible cells for optimal performance
-- **Real-time Updates**: WebSocket integration for live data updates with cell highlighting
-- **Performance Tracking**: Real-time statistics on rendered components and memory usage
+- **Virtualization**: Only renders visible cells for optimal performance with visual indicators
+- **Real-time Updates**: WebSocket integration with MongoDB sync for live data updates
+- **Performance Tracking**: Real-time statistics including visible row range and virtualization status
+- **MongoDB Integration**: Persistent data storage with automatic synchronization
+- **Multi-Client Support**: Multiple clients stay synchronized through WebSocket and MongoDB
 - **2D Pagination**: Horizontal and vertical scrolling with lazy loading
 - **Infinite Scrolling**: Loads additional data as user scrolls
 - **Data Source**: Uses JSONPlaceholder API as base data, expanded to 100+ columns
@@ -17,9 +19,10 @@ A high-performance data grid application built with React, Next.js, and AG Grid 
 
 - **Frontend**: React 18, Next.js 14 (App Router), TypeScript
 - **Data Grid**: AG Grid Community
+- **Database**: MongoDB Atlas (free tier)
 - **State Management**: TanStack Query (React Query)
 - **Styling**: Tailwind CSS, shadcn/ui
-- **Real-time**: WebSocket
+- **Real-time**: WebSocket with MongoDB persistence
 - **Performance**: Virtualization, Infinite Scrolling
 
 ## Getting Started
@@ -28,31 +31,69 @@ A high-performance data grid application built with React, Next.js, and AG Grid 
 
 - Node.js 18+ 
 - npm or yarn
+- MongoDB Atlas account (free tier)
+
+### MongoDB Setup
+
+1. **Create MongoDB Atlas Account**:
+   - Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+   - Sign up for a free account
+   - Create a new cluster (M0 Sandbox - Free tier)
+
+2. **Configure Database Access**:
+   - Add a database user with read/write permissions
+   - Configure network access (allow from anywhere for development)
+   - Get your connection string
+
+3. **Set Environment Variables**:
+   
+   Create `websocket-server/.env`:
+   ```env
+   MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/
+   DB_NAME=pesohq-grid
+   COLLECTION_NAME=grid-data
+   PORT=3001
+   ```
+   
+   Create `.env.local` in root:
+   ```env
+   NEXT_PUBLIC_WS_URL=ws://localhost:3001
+   MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/
+   DB_NAME=pesohq-grid
+   COLLECTION_NAME=grid-data
+   ```
 
 ### Installation
 
 1. Clone the repository:
-\`\`\`bash
+```bash
 git clone <repository-url>
-cd pesohq-data-grid
-\`\`\`
+cd pesohq-grid
+```
 
 2. Install dependencies:
-\`\`\`bash
+```bash
 npm install
-\`\`\`
+cd websocket-server && npm install
+cd ..
+```
 
 3. Start the WebSocket server (in a separate terminal):
-\`\`\`bash
-npm run ws-server
-\`\`\`
+```bash
+cd websocket-server
+npm start
+```
 
 4. Start the development server:
-\`\`\`bash
+```bash
 npm run dev
-\`\`\`
+```
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Testing Two Clients
+
+Open `test-two-clients.html` in your browser to see two clients running side by side. Edit cells in one client to see real-time updates in the other.
 
 ## Data Source
 
@@ -90,6 +131,9 @@ The application tracks and displays:
 - Number of cells currently rendered
 - WebSocket connection status
 - Last update timestamp
+- **Visible row range indicator** - Shows which rows are currently in viewport
+- **Virtualization status** - Visual indicator showing when virtualization is active
+- **Scroll position tracking** - Real-time updates as you scroll through data
 
 ## Real-time Updates
 

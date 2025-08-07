@@ -60,7 +60,7 @@ export const exportToExcel = (data: any[], options: ExportOptions = {}) => {
   const wb = XLSX.utils.book_new()
   
   // Convert data to worksheet
-  const ws = XLSX.utils.json_to_sheet(data, { header: includeHeaders ? undefined : 1 })
+  const ws = XLSX.utils.json_to_sheet(data, { header: includeHeaders ? undefined : [] })
   
   // Add worksheet to workbook
   XLSX.utils.book_append_sheet(wb, ws, 'Data')

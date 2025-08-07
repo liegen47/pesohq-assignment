@@ -11,15 +11,17 @@ The PesoHQ Grid application is built with a modern, performance-focused architec
    - Client-side data fetching with TanStack Query
    - AG-Grid Community for high-performance data visualization
 
-2. **Data Layer**: Hybrid API + Generated Data
+2. **Data Layer**: MongoDB Atlas + Generated Data
+   - MongoDB Atlas for persistent data storage
    - Base data from JSONPlaceholder API (https://jsonplaceholder.typicode.com/users)
    - Data expansion algorithm to generate 100+ columns per row
    - In-memory caching for loaded data chunks
 
-3. **Real-time Layer**: WebSocket Server
+3. **Real-time Layer**: WebSocket Server + MongoDB Sync
    - Node.js WebSocket server on port 3001
-   - Simulates live updates every 2 seconds
+   - MongoDB integration for data persistence
    - Broadcasts updates to all connected clients
+   - Automatic data synchronization between clients
 
 ## Performance Optimization Strategies
 
@@ -84,3 +86,42 @@ The PesoHQ Grid application is built with a modern, performance-focused architec
 - **Memory Usage**: Total rows/columns in cache
 - **Connection Status**: WebSocket health monitoring
 - **Update Latency**: Time since last real-time update
+- **Visible Row Range**: Current viewport row boundaries
+- **Virtualization Status**: Active/Inactive indicator
+
+## MongoDB Integration
+
+### Data Structure
+```javascript
+{
+  row_id: "row_0",
+  data: {
+    id: "row_0",
+    name: "User 1",
+    revenue: 500000,
+    // ... 100+ columns
+  },
+  updates: [
+    {
+      columnId: "revenue",
+      newValue: 600000,
+      timestamp: "2024-01-01T12:00:00Z"
+    }
+  ],
+  created_at: Date,
+  updated_at: Date
+}
+```
+
+### Real-time Sync Flow
+1. Client edits a cell
+2. Update sent via WebSocket to server
+3. Server persists to MongoDB
+4. Server broadcasts to all connected clients
+5. All clients receive real-time updates
+
+### MongoDB Setup Requirements
+- MongoDB Atlas free tier (M0 Sandbox)
+- Network access configuration
+- Connection string in environment variables
+- Automatic index creation for performance

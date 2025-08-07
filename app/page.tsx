@@ -27,7 +27,6 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import {
-  generateLargeDataset,
   generateColumnDefinitions,
   type DataRow,
 } from "@/lib/data-generator";
@@ -45,6 +44,9 @@ interface PerformanceStats {
   totalMemoryColumns: number;
   wsConnected: boolean;
   lastUpdate: string | null;
+  visibleRowRange: { start: number; end: number };
+  scrollPosition: { top: number; left: number };
+  virtualizationActive: boolean;
 }
 
 interface WSMessage {
@@ -54,8 +56,8 @@ interface WSMessage {
   newValue: any;
 }
 
-const TOTAL_ROWS = 100000;
-const TOTAL_COLUMNS = 120;
+const TOTAL_ROWS = 100000; // MongoDB has 100,000 rows
+const TOTAL_COLUMNS = 122; // 42 static + 80 dynamic columns
 const PAGE_SIZE = 100;
 
 export default function DataGridApp() {
@@ -67,6 +69,9 @@ export default function DataGridApp() {
     totalMemoryColumns: TOTAL_COLUMNS,
     wsConnected: false,
     lastUpdate: null,
+    visibleRowRange: { start: 0, end: 0 },
+    scrollPosition: { top: 0, left: 0 },
+    virtualizationActive: true,
   });
 
   const [loadedRows, setLoadedRows] = useState<DataRow[]>([]);
@@ -109,6 +114,22 @@ export default function DataGridApp() {
             row.id === rowId ? { ...row, [columnId]: newValue } : row
           )
         );
+      }
+
+      // Refresh the specific cell in AG-Grid
+      if (gridRef.current?.api) {
+        const rowNode = gridRef.current.api.getRowNode(rowId);
+        if (rowNode) {
+          rowNode.setDataValue(columnId, newValue);
+        }
+        
+        // Flash the cell to show it was updated
+        if (rowNode) {
+          gridRef.current.api.flashCells({
+            rowNodes: [rowNode],
+            columns: [columnId],
+          });
+        }
       }
 
       setPerformanceStats((prev) => ({
@@ -207,13 +228,19 @@ export default function DataGridApp() {
     };
   }, [wsServerUrl, handleRealTimeUpdate]);
 
-  // Load data for filtering (limited dataset for demo)
+  // Load data for filtering from MongoDB
   const loadDataForFiltering = useCallback(async () => {
     setIsLoadingAllData(true);
     try {
-      // Load 5000 rows for filtering demo (full 100K would be too heavy for browser)
-      const FILTER_DATASET_SIZE = 5000;
-      const data = await generateLargeDataset(0, FILTER_DATASET_SIZE, columns);
+      // Load first 5000 rows from MongoDB for filtering (full 100K would be too heavy)
+      const response = await fetch(`/api/mongodb-data?startRow=0&endRow=5000`);
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
+      const data = result.rows || [];
       setAllData(data);
       setUseClientSideModel(true);
 
@@ -228,17 +255,24 @@ export default function DataGridApp() {
         totalMemoryRows: data.length,
       }));
     } catch (error) {
-      console.error("Error loading data for filtering:", error);
+      console.error("Error loading data from MongoDB:", error);
     } finally {
       setIsLoadingAllData(false);
     }
   }, [columns]);
 
-  // Load initial data
+  // Load initial data from MongoDB
   const { data: initialData, isLoading } = useQuery({
     queryKey: ["gridData", 0, PAGE_SIZE],
     queryFn: async () => {
-      const data = await generateLargeDataset(0, PAGE_SIZE, columns);
+      const response = await fetch(`/api/mongodb-data?startRow=0&endRow=${PAGE_SIZE}`);
+      const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
+      const data = result.rows || [];
       setLoadedRows(data);
       setPerformanceStats((prev) => ({
         ...prev,
@@ -259,11 +293,15 @@ export default function DataGridApp() {
             const { startRow, endRow } = params;
 
             try {
-              const newData = await generateLargeDataset(
-                startRow,
-                endRow,
-                columns
-              );
+              // Fetch from MongoDB API instead of generating data
+              const response = await fetch(`/api/mongodb-data?startRow=${startRow}&endRow=${endRow}`);
+              const result = await response.json();
+              
+              if (result.error) {
+                throw new Error(result.error);
+              }
+
+              const newData = result.rows || [];
 
               setLoadedRows((prev) => {
                 const updated = [...prev, ...newData];
@@ -275,9 +313,9 @@ export default function DataGridApp() {
                 return updated;
               });
 
-              params.successCallback(newData, TOTAL_ROWS);
+              params.successCallback(newData, result.lastRow || TOTAL_ROWS);
             } catch (error) {
-              console.error("Error loading data:", error);
+              console.error("Error loading data from MongoDB:", error);
               params.failCallback();
             }
           },
@@ -289,19 +327,42 @@ export default function DataGridApp() {
     [columns, useClientSideModel]
   );
 
-  // Track rendered cells
+  // Track rendered cells and scroll position
   const onFirstDataRendered = useCallback(() => {
     const updateStats = () => {
       if (gridRef.current?.api) {
         const renderedRowCount = gridRef.current.api.getDisplayedRowCount();
         const visibleColumns =
           gridRef.current.api.getAllDisplayedColumns()?.length || 0;
-        const cellsRendered = renderedRowCount * visibleColumns;
 
+        // Get visible row range using correct AG-Grid API methods
+        let firstDisplayedRow = 0;
+        let lastDisplayedRow = renderedRowCount - 1;
+        
+        try {
+          // Use the correct API methods
+          if (gridRef.current.api.getFirstDisplayedRowIndex) {
+            firstDisplayedRow = gridRef.current.api.getFirstDisplayedRowIndex() || 0;
+            lastDisplayedRow = gridRef.current.api.getLastDisplayedRowIndex() || renderedRowCount - 1;
+          }
+        } catch (e) {
+          // Fallback to default values
+          console.log('Viewport tracking using fallback values');
+        }
+
+        // Calculate actual visible rows (what's in the viewport)
+        const actualVisibleRows = lastDisplayedRow - firstDisplayedRow + 1;
+        const cellsRendered = actualVisibleRows * visibleColumns;
+        
         setPerformanceStats((prev) => ({
           ...prev,
           cellsRendered,
           columnsLoaded: visibleColumns,
+          visibleRowRange: {
+            start: firstDisplayedRow,
+            end: lastDisplayedRow,
+          },
+          virtualizationActive: renderedRowCount < prev.totalMemoryRows,
         }));
       }
     };
@@ -354,24 +415,24 @@ export default function DataGridApp() {
           if (exportAll) {
             // Export all data - need to load it first
             try {
-              // Export all 100,000 rows in batches
+              // Export all data from MongoDB in batches
               const batchSize = 5000;
               let allDataForExport: DataRow[] = [];
               setExportProgress({ current: 0, total: TOTAL_ROWS });
 
               for (let i = 0; i < TOTAL_ROWS; i += batchSize) {
                 const endRow = Math.min(i + batchSize, TOTAL_ROWS);
-                const batchData = await generateLargeDataset(
-                  i,
-                  endRow,
-                  columns
-                );
-                allDataForExport = [...allDataForExport, ...batchData];
-
-                // Update progress
+                const response = await fetch(`/api/mongodb-data?startRow=${i}&endRow=${endRow}`);
+                const result = await response.json();
+                
+                if (result.error) {
+                  throw new Error(result.error);
+                }
+                
+                allDataForExport = [...allDataForExport, ...result.rows];
                 setExportProgress({ current: endRow, total: TOTAL_ROWS });
-
-                // Small delay to ensure UI updates and prevent browser freeze
+                
+                // Small delay to prevent browser freeze
                 await new Promise((resolve) => setTimeout(resolve, 50));
               }
 
@@ -492,7 +553,7 @@ export default function DataGridApp() {
             </div>
             <h1 className="text-4xl font-bold text-gray-900">PesoHQ</h1>
             <p className="text-lg text-gray-600">
-              {TOTAL_ROWS.toLocaleString()} rows × {TOTAL_COLUMNS} columns
+              {TOTAL_ROWS.toLocaleString()} rows × {TOTAL_COLUMNS} columns = {(TOTAL_ROWS * TOTAL_COLUMNS).toLocaleString()} total cells
             </p>
           </div>
 
@@ -636,6 +697,32 @@ export default function DataGridApp() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Virtualization Status */}
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${performanceStats.virtualizationActive ? 'bg-green-500' : 'bg-gray-400'}`} />
+              <span className="text-sm font-medium text-gray-700">
+                Virtualization: {performanceStats.virtualizationActive ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+            
+            <div className="bg-gray-100 rounded-lg p-3 space-y-1">
+              <div className="text-xs font-medium text-gray-600 uppercase tracking-wider">Visible Row Range</div>
+              <div className="text-sm text-gray-800">
+                Rows {performanceStats.visibleRowRange.start.toLocaleString()} - {performanceStats.visibleRowRange.end.toLocaleString()}
+              </div>
+              <div className="text-xs text-gray-500">
+                Showing {(performanceStats.visibleRowRange.end - performanceStats.visibleRowRange.start + 1).toLocaleString()} of {TOTAL_ROWS.toLocaleString()} total rows
+              </div>
+            </div>
+
+            <div className="text-xs text-gray-500">
+              <div>• Only visible cells are rendered (DOM virtualization)</div>
+              <div>• Scroll to load more data (infinite scroll)</div>
+              <div>• Memory usage limited to {(performanceStats.totalMemoryRows).toLocaleString()} rows</div>
+            </div>
+          </div>
         </div>
 
         {/* Data Grid */}
@@ -683,10 +770,31 @@ export default function DataGridApp() {
                 onGridReady={onGridReady}
                 onFirstDataRendered={onFirstDataRendered}
                 onCellValueChanged={onCellValueChanged}
+                getRowId={(params) => params.data.id}
                 onFilterChanged={(event) => {
                   const filterModel = event.api.getFilterModel();
                   console.log("Filter changed:", filterModel);
                   setIsFiltering(Object.keys(filterModel).length > 0);
+                }}
+                onBodyScroll={(event) => {
+                  // Track scroll position
+                  if (event.api) {
+                    try {
+                      // Use the correct API methods for viewport tracking
+                      const firstRow = event.api.getFirstDisplayedRowIndex ? 
+                        event.api.getFirstDisplayedRowIndex() : 0;
+                      const lastRow = event.api.getLastDisplayedRowIndex ? 
+                        event.api.getLastDisplayedRowIndex() : 0;
+                      
+                      setPerformanceStats((prev) => ({
+                        ...prev,
+                        visibleRowRange: { start: firstRow || 0, end: lastRow || 0 },
+                      }));
+                    } catch (e) {
+                      // Fallback if methods not available
+                      console.log('Scroll tracking error:', e);
+                    }
+                  }
                 }}
                 suppressRowClickSelection={true}
                 enableRangeSelection={true}
@@ -709,6 +817,92 @@ export default function DataGridApp() {
                 rowBuffer={10}
                 debounceVerticalScrollbar={true}
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Real-time Performance Metrics */}
+        <Card className="bg-gray-900 text-white border-gray-800">
+          <CardHeader>
+            <CardTitle className="text-lg font-semibold flex items-center">
+              <Activity className="w-5 h-5 mr-2" />
+              Real-time Performance Metrics
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-sm text-gray-400 mb-1">Cells Currently Rendered</div>
+                <div className="text-2xl font-bold text-green-400">
+                  {performanceStats.cellsRendered.toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {(performanceStats.visibleRowRange.end - performanceStats.visibleRowRange.start + 1).toLocaleString()} rows × {performanceStats.columnsLoaded} columns
+                </div>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-sm text-gray-400 mb-1">Total Possible Cells</div>
+                <div className="text-2xl font-bold text-blue-400">
+                  {(TOTAL_ROWS * TOTAL_COLUMNS).toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {TOTAL_ROWS.toLocaleString()} rows × {TOTAL_COLUMNS} columns
+                </div>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-sm text-gray-400 mb-1">Virtualization Efficiency</div>
+                <div className="text-2xl font-bold text-green-400">
+                  {((performanceStats.cellsRendered / (TOTAL_ROWS * TOTAL_COLUMNS)) * 100).toFixed(4)}%
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Lower is better! Only {performanceStats.cellsRendered.toLocaleString()} cells in DOM
+                </div>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-sm text-gray-400 mb-1">Rows in Memory</div>
+                <div className="text-2xl font-bold text-purple-400">
+                  {performanceStats.totalMemoryRows.toLocaleString()}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {((performanceStats.totalMemoryRows / TOTAL_ROWS) * 100).toFixed(1)}% of total rows
+                </div>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-sm text-gray-400 mb-1">Visible Row Range</div>
+                <div className="text-2xl font-bold text-orange-400">
+                  {performanceStats.visibleRowRange.start} - {performanceStats.visibleRowRange.end}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Scroll position in grid
+                </div>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-4">
+                <div className="text-sm text-gray-400 mb-1">DOM Virtualization</div>
+                <div className="text-2xl font-bold">
+                  <span className={performanceStats.virtualizationActive ? 'text-green-400' : 'text-red-400'}>
+                    {performanceStats.virtualizationActive ? 'ACTIVE' : 'INACTIVE'}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {performanceStats.virtualizationActive ? 'Optimizing performance' : 'All rows rendered'}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 p-4 bg-gray-800 rounded-lg">
+              <div className="text-sm text-gray-400 mb-2">Performance Note</div>
+              <div className="text-xs text-gray-300 space-y-1">
+                <div>• AG-Grid uses DOM virtualization - only visible cells are rendered in the DOM</div>
+                <div>• As you scroll, cells are recycled and reused for new data</div>
+                <div>• This allows handling millions of cells without crashing the browser</div>
+                <div>• Virtualization efficiency: {((performanceStats.cellsRendered / (TOTAL_ROWS * TOTAL_COLUMNS)) * 100).toFixed(4)}% - The lower, the better!</div>
+                <div>• If we rendered all 12.2 million cells, your browser would crash immediately</div>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -772,7 +966,7 @@ export default function DataGridApp() {
                 <div className="rounded-lg border p-4">
                   <h4 className="font-medium mb-2">Export all data</h4>
                   <p className="text-sm text-gray-600 mb-3">
-                    Export all 100,000 rows (this may take a while)
+                    Export all 100,000 rows from MongoDB
                   </p>
                   <Button
                     onClick={() => handleExport(true)}

@@ -1,5 +1,14 @@
+require('dotenv').config()
 const WebSocket = require("ws")
 const http = require("http")
+const { 
+  connectToDatabase, 
+  initializeData, 
+  getAllRows, 
+  updateCell, 
+  getRecentUpdates,
+  closeConnection 
+} = require('./db')
 
 const PORT = process.env.PORT || 3001
 
@@ -23,6 +32,20 @@ console.log(`Server starting on port ${PORT}`)
 // Store connected clients
 const clients = new Set()
 
+// Initialize MongoDB connection and data
+async function initialize() {
+  try {
+    await connectToDatabase()
+    await initializeData()
+    console.log('MongoDB initialized successfully')
+  } catch (error) {
+    console.error('Failed to initialize MongoDB:', error)
+    console.log('WebSocket server will run without MongoDB persistence')
+  }
+}
+
+initialize()
+
 wss.on("connection", (ws) => {
   console.log("Client connected")
   clients.add(ws)
@@ -40,8 +63,40 @@ wss.on("connection", (ws) => {
     clients.delete(ws)
   })
 
-  ws.on("message", (data) => {
-    console.log("Received message:", data.toString())
+  ws.on("message", async (data) => {
+    try {
+      const message = JSON.parse(data.toString())
+      console.log("Received message:", message)
+      
+      // Handle cell updates from clients
+      if (message.type === 'update') {
+        const { rowId, columnId, newValue } = message
+        
+        // Save to MongoDB
+        const success = await updateCell(rowId, columnId, newValue)
+        
+        if (success) {
+          // Broadcast update to all connected clients
+          const broadcastMessage = JSON.stringify({
+            type: 'update',
+            rowId,
+            columnId,
+            newValue,
+            timestamp: new Date().toISOString()
+          })
+          
+          clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(broadcastMessage)
+            }
+          })
+          
+          console.log(`Update saved and broadcast: ${rowId}.${columnId} = ${newValue}`)
+        }
+      }
+    } catch (error) {
+      console.error("Error processing message:", error)
+    }
   })
 })
 
@@ -95,29 +150,8 @@ function generateUpdateValue(columnId) {
   }
 }
 
-// Simulate real-time updates
-setInterval(() => {
-  if (clients.size > 0) {
-    const randomRowId = `row_${Math.floor(Math.random() * 1000)}`
-    const randomColumnId = updateableColumns[Math.floor(Math.random() * updateableColumns.length)]
-    const randomValue = generateUpdateValue(randomColumnId)
-
-    const message = JSON.stringify({
-      type: "update",
-      rowId: randomRowId,
-      columnId: randomColumnId,
-      newValue: randomValue,
-    })
-
-    clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message)
-      }
-    })
-
-    console.log(`Sent update: ${randomRowId}.${randomColumnId} = ${randomValue}`)
-  }
-}, 2000) // Send update every 2 seconds
+// Updates now only happen when cells are edited by users
+// Row IDs range from row_0 to row_99999 for 100,000 rows
 
 // Start the HTTP server
 server.listen(PORT, () => {
@@ -127,7 +161,7 @@ server.listen(PORT, () => {
 })
 
 // Handle graceful shutdown
-process.on("SIGINT", () => {
+process.on("SIGINT", async () => {
   console.log("Shutting down server...")
   
   // Close all WebSocket connections
@@ -135,8 +169,12 @@ process.on("SIGINT", () => {
     client.close(1000, 'Server shutting down')
   })
   
-  wss.close(() => {
+  wss.close(async () => {
     console.log("WebSocket server closed")
+    
+    // Close MongoDB connection
+    await closeConnection()
+    
     server.close(() => {
       console.log("HTTP server closed")
       process.exit(0)

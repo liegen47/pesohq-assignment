@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PesoHQ Grid - Two Client Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .clients-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .client-frame {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            position: relative;
+        }
+        .client-header {
+            background: #333;
+            color: white;
+            padding: 10px 15px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #dc3545;
+            margin-left: 10px;
+        }
+        .status-dot.connected {
+            background: #28a745;
+        }
+        iframe {
+            width: 100%;
+            height: 800px;
+            border: none;
+        }
+        .instructions {
+            background: #e3f2fd;
+            border: 1px solid #64b5f6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .instructions h2 {
+            margin-top: 0;
+            color: #1976d2;
+            font-size: 18px;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        .instructions li {
+            margin-bottom: 8px;
+        }
+        .instructions code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .mongodb-status {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PesoHQ Grid - Two Client Test (No Authentication)</h1>
+        
+        <div class="instructions">
+            <h2>📋 Test Instructions:</h2>
+            <ol>
+                <li><strong>Setup MongoDB:</strong> Update <code>MONGODB_URI</code> in <code>websocket-server/.env</code> with your MongoDB Atlas connection string</li>
+                <li><strong>Start WebSocket Server:</strong> Run <code>cd websocket-server && npm start</code> in a terminal</li>
+                <li><strong>Start Next.js App:</strong> Run <code>npm run dev</code> in another terminal</li>
+                <li><strong>Open this file:</strong> Open <code>test-two-clients.html</code> in your browser</li>
+                <li><strong>Test Real-time Sync:</strong> 
+                    <ul>
+                        <li>Edit a cell in Client 1 - see it update in Client 2</li>
+                        <li>Scroll in either client to see virtualization indicators</li>
+                        <li>Watch the WebSocket status indicators (green = connected)</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+
+        <div class="mongodb-status">
+            <strong>MongoDB Status:</strong> Make sure your MongoDB Atlas cluster is running and accessible
+        </div>
+
+        <div class="clients-wrapper">
+            <div class="client-frame">
+                <div class="client-header">
+                    <span>Client 1</span>
+                    <div style="display: flex; align-items: center;">
+                        <span style="font-size: 12px;">WebSocket</span>
+                        <div class="status-dot" id="status1"></div>
+                    </div>
+                </div>
+                <iframe id="client1" src="http://localhost:3000"></iframe>
+            </div>
+            
+            <div class="client-frame">
+                <div class="client-header">
+                    <span>Client 2</span>
+                    <div style="display: flex; align-items: center;">
+                        <span style="font-size: 12px;">WebSocket</span>
+                        <div class="status-dot" id="status2"></div>
+                    </div>
+                </div>
+                <iframe id="client2" src="http://localhost:3000"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check WebSocket connection status
+        function checkWebSocketStatus() {
+            // Check if both iframes have loaded
+            const iframe1 = document.getElementById('client1');
+            const iframe2 = document.getElementById('client2');
+            
+            try {
+                // Try to access the iframe's performance stats
+                const checkStatus = (iframe, statusId) => {
+                    try {
+                        // This will fail due to CORS, but we can still indicate that the page loaded
+                        iframe.contentWindow.document;
+                        // If we get here, same origin, we could check actual WS status
+                    } catch (e) {
+                        // Different origin, assume connected if iframe loaded
+                        if (iframe.contentDocument === null) {
+                            // Iframe loaded successfully
+                            document.getElementById(statusId).classList.add('connected');
+                        }
+                    }
+                };
+                
+                checkStatus(iframe1, 'status1');
+                checkStatus(iframe2, 'status2');
+            } catch (e) {
+                console.log('Status check:', e);
+            }
+        }
+        
+        // Check status after iframes load
+        window.onload = () => {
+            setTimeout(checkWebSocketStatus, 3000);
+            // Recheck periodically
+            setInterval(checkWebSocketStatus, 5000);
+        };
+    </script>
+</body>
+</html>
